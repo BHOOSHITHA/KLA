@@ -1,30 +1,35 @@
 import json
 from collections import defaultdict
 
-with open('Milestone4c.json', 'r') as file:
+with open(r'Milestone2b.json', 'r') as file:
     data = json.load(file)
 
 schedule = []
-wafer_id_counter = defaultdict(int)#no of wafers processed of each type
+wafer_id_counter = defaultdict(int)  # Number of wafers processed of each type
 machine_available_times = defaultdict(int)
-wafer_time_counter = defaultdict(int) #time each wafer will be ready for the next step.
-machine_parameters = {m['machine_id']: m['initial_parameters'].copy() for m in data['machines']} #current parameters of each machine.
-machine_wafers_processed = defaultdict(int) # no of wafers processed by each machine before the parameters fluctuate.
+wafer_time_counter = defaultdict(int)  # Time each wafer will be ready for the next step
+machine_parameters = {m['machine_id']: m['initial_parameters'].copy() for m in data['machines']}  # Current parameters of each machine
+machine_wafers_processed = defaultdict(int)  # No of wafers processed by each machine before the parameters fluctuate
+machine_reset_times = defaultdict(lambda: -1)  # Time at which machine parameters reset after cooldown
 
-# check if machine parameters are within limits
+# Check if machine parameters are within limits
 def check_fluctuations(machine, step):
     for param, value in machine_parameters[machine['machine_id']].items():
         if not (data['steps'][int(step[-1]) - 1]['parameters'][param][0] <= value <= data['steps'][int(step[-1]) - 1]['parameters'][param][1]):
             return False
     return True
 
-# update machine parameters with fluctuation
+# Update machine parameters with fluctuation
 def update_machine_parameters(machine):
     for param in machine_parameters[machine['machine_id']]:
         new_value = machine_parameters[machine['machine_id']][param] + machine['fluctuation'][param]
-        # Ensure  new value is within the specified range
+        # Ensure the new value is within the specified range
         param_range = data['steps'][int(machine['step_id'][-1]) - 1]['parameters'][param]
         machine_parameters[machine['machine_id']][param] = min(max(new_value, param_range[0]), param_range[1])
+
+# Reset machine parameters after cooldown
+def reset_machine_parameters(machine):
+    machine_parameters[machine['machine_id']] = data['machines'][int(machine['machine_id'][-1]) - 1]['initial_parameters'].copy()
 
 # Process each wafer
 for wafer in data['wafers']:
@@ -41,7 +46,7 @@ for wafer in data['wafers']:
                 wafer_dependency_end_time = max((entry['end_time'] for entry in schedule if entry['wafer_id'] == wafer_id and entry['step'] == dependent_step), default=0)
             else:
                 wafer_dependency_end_time = 0
-            
+
             # Find suitable machines for the step and check for fluctuations
             suitable_machines = [m for m in data['machines'] if m['step_id'] == step_id and check_fluctuations(m, step_id)]
             if not suitable_machines:
@@ -49,6 +54,11 @@ for wafer in data['wafers']:
                 continue
 
             machine = min(suitable_machines, key=lambda m: machine_available_times[m['machine_id']])
+
+            # Check if the machine needs to be reset after cooldown
+            if machine_reset_times[machine['machine_id']] != -1 and machine_available_times[machine['machine_id']] >= machine_reset_times[machine['machine_id']]:
+                reset_machine_parameters(machine)
+                machine_reset_times[machine['machine_id']] = -1
 
             # Determine start time based on machine availability, previous steps, and dependencies
             start_time = max(machine_available_times[machine['machine_id']], wafer_time_counter[wafer_id], wafer_dependency_end_time)
@@ -63,8 +73,8 @@ for wafer in data['wafers']:
                 'end_time': end_time
             })
 
-            # Update machine and wafer times
-            machine_available_times[machine['machine_id']] = end_time + machine['cooldown_time']
+            
+            machine_available_times[machine['machine_id']] = end_time
             wafer_time_counter[wafer_id] = end_time
 
             # Update machine parameters and processed wafer count
@@ -72,13 +82,13 @@ for wafer in data['wafers']:
             if machine_wafers_processed[machine['machine_id']] >= machine['n']:
                 update_machine_parameters(machine)
                 machine_wafers_processed[machine['machine_id']] = 0
-                # Reset parameters after cooldown period
-                machine_parameters[machine['machine_id']] = data['machines'][int(machine['machine_id'][-1])-1]['initial_parameters'].copy()
-
+                # Schedule cooldown and reset time
+                machine_available_times[machine['machine_id']] += machine['cooldown_time']
+                machine_reset_times[machine['machine_id']] = machine_available_times[machine['machine_id']]
 
 for entry in schedule:
     print(f"Wafer ID: {entry['wafer_id']}, Step: {entry['step']}, Machine: {entry['machine']}, Start Time: {entry['start_time']}, End Time: {entry['end_time']}")
 
 # Save as JSON
-with open('schedule4c.json', 'w') as outfile:
+with open('schedule2b.json', 'w') as outfile:
     json.dump(schedule, outfile, indent=4)
